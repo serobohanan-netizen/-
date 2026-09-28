@@ -236,7 +236,9 @@ td.wrap { white-space: normal; min-width: 220px; }
 .tpl-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
 .tpl .head { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .tpl .text { white-space: pre-wrap; font-size: 13px; color: var(--text-2); }
-.tpl .foot { margin-top: 14px; display: flex; justify-content: flex-end; }
+.tpl .text.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.tpl .foot { margin-top: 14px; display: flex; justify-content: flex-end; gap: 8px; }
+.link-btn { border: 0; background: none; color: var(--text-2); cursor: pointer; font-size: 12px; text-decoration: underline; padding: 0; margin-right: auto; }
 
 /* ───── Калькулятор ───── */
 .calc { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 16px; align-items: start; }

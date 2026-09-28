@@ -588,9 +588,9 @@
         }).join('') + '</div><span class="grow"></span><span class="muted" style="font-size:12px">Найдено: ' + list.length + '</span></div>' +
         (list.length ? '<div class="tpl-list">' + list.map(function (t, i) {
           return '<div class="card tpl"><div class="head"><span class="chip">' + esc(t.marketplace || 'Обе площадки') + '</span>' +
-            '<span class="chip">' + esc(t.type) + '</span>' + (t.rating ? badge(Number(t.rating) >= 4 ? 'good' : Number(t.rating) === 3 ? 'warn' : 'crit', 'Оценка ' + t.rating) : '') +
-            '</div><div style="font-weight:500;margin-bottom:8px">' + esc(t.situation) + '</div><div class="text">' + esc(t.text) + '</div>' +
-            '<div class="foot"><button class="btn ghost small" data-copy="' + i + '">' + icon('copy') + 'Скопировать</button></div></div>';
+            '<span class="chip">' + esc(t.type) + '</span>' + (t.rating ? badge(parseInt(t.rating, 10) >= 4 ? 'good' : 'crit', 'Оценка ' + t.rating) : '') +
+            '</div><div style="font-weight:500;margin-bottom:8px">' + esc(t.situation) + '</div><div class="text' + (t.text.length > 320 ? ' clamp' : '') + '">' + esc(t.text) + '</div>' +
+            '<div class="foot">' + (t.text.length > 320 ? '<button class="link-btn" data-more>Показать полностью</button>' : '') + '<button class="btn ghost small" data-copy="' + i + '">' + icon('copy') + 'Скопировать</button></div></div>';
         }).join('') + '</div>' :
           '<div class="card empty"><span class="serif">Шаблонов не найдено</span>Шаблоны хранятся на листе «05_Шаблоны_ответов».</div>');
       $('#tq2').oninput = function (e) {
@@ -600,6 +600,12 @@
       $$('#segType button').forEach(function (b) { b.onclick = function () { tplState.type = b.getAttribute('data-t'); VIEWS.templates.draw(); }; });
       $$('#segTplMp button').forEach(function (b) { b.onclick = function () { tplState.mp = b.getAttribute('data-m'); VIEWS.templates.draw(); }; });
       $$('[data-copy]').forEach(function (b) { b.onclick = function () { copyText(list[Number(b.getAttribute('data-copy'))].text); }; });
+      $$('[data-more]').forEach(function (b) {
+        b.onclick = function () {
+          var text = b.closest('.tpl').querySelector('.text'), open = text.classList.toggle('clamp');
+          b.textContent = open ? 'Показать полностью' : 'Свернуть';
+        };
+      });
     }
   };
 

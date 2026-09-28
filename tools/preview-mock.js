@@ -117,7 +117,9 @@
           t.comments = (t.comments ? t.comments + '\n' : '') + 'сейчас — ' + current.name + ': ' + payload.text; return { comments: t.comments };
         },
         products: products,
-        templates: function () { return templates; },
+        templates: function () {
+          return window.__STARTER ? window.__STARTER.map(function (r) { return { id: r[0], marketplace: r[1], type: r[2], rating: r[3], situation: r[4], text: r[5] }; }) : templates;
+        },
         params: function () { return params; }
       };
       return { ok: true, data: h[action]() };

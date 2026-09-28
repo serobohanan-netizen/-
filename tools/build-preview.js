@@ -14,7 +14,9 @@ const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 let html = read('Index.html').replace(/<\?!=\s*include\('(\w+)'\)\s*\?>/g, (_, name) => {
   if (name === 'App') {
     const mock = fs.readFileSync(path.join(__dirname, 'preview-mock.js'), 'utf8');
-    return '<script>' + mock + '</script>\n' + read('App.html');
+    // Настоящие стартовые шаблоны из Templates.gs
+    const starter = new Function(fs.readFileSync(path.join(root, 'Templates.gs'), 'utf8') + '; return STARTER_TEMPLATES;')();
+    return '<script>window.__STARTER = ' + JSON.stringify(starter) + ';</script>\n<script>' + mock + '</script>\n' + read('App.html');
   }
   return read(name + '.html');
 });

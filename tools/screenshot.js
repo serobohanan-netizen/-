@@ -36,7 +36,7 @@ const path = require('path');
     }
   }
   const name = `${view}-${theme}-${login}-${width}${process.env.CLICK ? '-click' : ''}${process.env.FILL ? '-fill' : ''}.png`;
-  await page.screenshot({ path: path.join(outDir, name), fullPage: !mobile });
+  await page.screenshot({ path: path.join(outDir, name), fullPage: !mobile && !process.env.VIEWPORT });
   if (errors.length) console.error('Ошибки страницы:', errors);
   console.log(name);
   await browser.close();

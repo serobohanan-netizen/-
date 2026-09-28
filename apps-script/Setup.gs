@@ -9,6 +9,12 @@ function onOpen() {
     .addItem('1. Создать структуру таблицы', 'setupStructure')
     .addItem('2. Выдать временный пароль сотруднику', 'issueTemporaryPassword')
     .addItem('Разблокировать вход сотрудника', 'unlockUser')
+    .addSeparator()
+    .addItem('Загрузить данные из источников сейчас', 'importNow')
+    .addItem('Включить автозагрузку каждый час', 'importEnableSchedule')
+    .addItem('Выключить автозагрузку', 'importDisableSchedule')
+    .addSeparator()
+    .addItem('Загрузить стартовые шаблоны ответов', 'loadStarterTemplates')
     .addToUi();
 }
 
@@ -22,6 +28,11 @@ function setupStructure() {
   var users = buildSheet_(ss, SHEETS.USERS, HEADERS.USERS);
   var params = buildSheet_(ss, SHEETS.PARAMS, HEADERS.PARAMS);
   buildSheet_(ss, SHEETS.LOG, HEADERS.LOG);
+  var sources = buildSheet_(ss, SHEETS.SOURCES, HEADERS.SOURCES);
+  if (sources.getLastRow() < 2) {
+    var map = importMappingTemplate_();
+    sources.getRange(2, 1, map.length, HEADERS.SOURCES.length).setValues(map);
+  }
 
   // Параметры по умолчанию — только если лист пустой
   if (params.getLastRow() < 2) {
@@ -37,7 +48,7 @@ function setupStructure() {
   users.hideColumns(6, 2); // соль и хеш пароля не нужны глазам
 
   // Защита служебных листов: править может только владелец таблицы
-  [SHEETS.USERS, SHEETS.PARAMS, SHEETS.LOG].forEach(function (name) {
+  [SHEETS.USERS, SHEETS.PARAMS, SHEETS.SOURCES, SHEETS.LOG].forEach(function (name) {
     var sheet = ss.getSheetByName(name);
     if (sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).length === 0) {
       var p = sheet.protect().setDescription('Служебный лист рабочей системы HOK\'S LOVE');
@@ -48,8 +59,10 @@ function setupStructure() {
 
   SpreadsheetApp.getUi().alert(
     'Структура готова.\n\n' +
-    'Дальше: на листе «' + SHEETS.USERS + '» впишите логин, имя, роль и «Да» в колонке «Активен», ' +
-    'затем меню HOK\'S LOVE → «Выдать временный пароль сотруднику».');
+    'Дальше:\n1) на листе «' + SHEETS.USERS + '» впишите логин, имя, роль и «Да» в колонке «Активен», ' +
+    'затем меню HOK\'S LOVE → «Выдать временный пароль сотруднику»;\n' +
+    '2) на листе «' + SHEETS.SOURCES + '» укажите, из каких ваших таблиц брать данные, ' +
+    'затем «Загрузить данные из источников сейчас».');
 }
 
 function buildSheet_(ss, name, header) {
