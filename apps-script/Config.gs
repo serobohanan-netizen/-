@@ -40,18 +40,19 @@ var TASK_SECTIONS = ['Wildberries', 'Ozon', 'Склад', 'Карточки', '�
 
 /**
  * Роли. Что означает каждое право:
- *  sections  — какие разделы сайта видны
+ *  sections  — какие разделы сайта видны. Раздел 'summary' (Сводка) пока выключен:
+ *              чтобы вернуть, допишите его первым в список, например ['summary', 'tasks', …]
  *  money     — видит выручку, суммы заказов, рекламу, цены
  *  cost      — видит себестоимость и калькуляторы
  *  allTasks  — может редактировать любые задачи (иначе — только свои и назначенные ему)
  */
 var ROLES = {
   'Владелец': {
-    sections: ['summary', 'tasks', 'products', 'templates', 'calc'],
+    sections: ['tasks', 'products', 'templates', 'calc'],
     money: true, cost: true, allTasks: true
   },
   'Главный менеджер': {
-    sections: ['summary', 'tasks', 'products', 'templates', 'calc'],
+    sections: ['tasks', 'products', 'templates', 'calc'],
     money: true, cost: true, allTasks: true
   },
   'Склад': {

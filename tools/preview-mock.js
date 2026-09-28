@@ -5,8 +5,8 @@
  */
 (function () {
   var ROLES = {
-    vladelec: { name: 'Владелец', role: 'Владелец', sections: ['summary', 'tasks', 'products', 'templates', 'calc'], money: true, cost: true, allTasks: true },
-    menedzher: { name: 'Анна', role: 'Главный менеджер', sections: ['summary', 'tasks', 'products', 'templates', 'calc'], money: true, cost: true, allTasks: true },
+    vladelec: { name: 'Владелец', role: 'Владелец', sections: ['tasks', 'products', 'templates', 'calc'], money: true, cost: true, allTasks: true },
+    menedzher: { name: 'Анна', role: 'Главный менеджер', sections: ['tasks', 'products', 'templates', 'calc'], money: true, cost: true, allTasks: true },
     sklad: { name: 'Игорь', role: 'Склад', sections: ['tasks', 'products'], money: false, cost: false, allTasks: false }
   };
   var current = null;
