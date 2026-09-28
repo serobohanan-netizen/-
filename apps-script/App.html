@@ -1,0 +1,743 @@
+<script>
+/* HOK'S LOVE — рабочая система. Логика страницы. */
+(function () {
+  'use strict';
+
+  var state = { token: null, user: null, view: null, cache: {} };
+  var VIEWS = {};
+  var app = document.getElementById('app');
+
+  /* ───── Хранилище браузера: только тема и сессия, всё в try/catch ───── */
+  function store(kind, key, value) {
+    try {
+      var s = kind === 'local' ? window.localStorage : window.sessionStorage;
+      if (value === undefined) return s.getItem(key);
+      if (value === null) s.removeItem(key); else s.setItem(key, value);
+    } catch (e) { return null; }
+  }
+
+  /* ───── Тема ───── */
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    store('local', 'hl_theme', theme);
+  }
+  applyTheme(store('local', 'hl_theme') || 'dark');
+  function toggleTheme() {
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    if (state.view && VIEWS[state.view].redraw) VIEWS[state.view].redraw();
+  }
+
+  /* ───── Запросы к серверу ───── */
+  function run(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) {
+        reject(new Error(e && e.message ? e.message : 'Ошибка связи с сервером'));
+      });
+      r[fn].apply(r, args);
+    });
+  }
+  function call(action, payload) {
+    return run('api', state.token, action, payload || null).then(function (r) {
+      if (r.ok) return r.data;
+      if (r.error === 'SESSION_EXPIRED') { signOut(true); throw new Error('Сессия закончилась, войдите снова'); }
+      throw new Error(r.error);
+    });
+  }
+
+  /* ───── Утилиты ───── */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  var nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+  var nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  var nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function n0(v) { return v == null || isNaN(v) ? '—' : nf0.format(v); }
+  function n1(v) { return v == null || isNaN(v) ? '—' : nf1.format(v); }
+  function n2(v) { return v == null || isNaN(v) ? '—' : nf2.format(v); }
+  var nf4 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 4 });
+  function n4(v) { return v == null || isNaN(v) ? '—' : nf4.format(v); }
+  function rub(v) { return v == null || isNaN(v) ? '—' : nf0.format(v) + ' ₽'; }
+  function rub2(v) { return v == null || isNaN(v) ? '—' : nf2.format(v) + ' ₽'; }
+  function pct(v) { return v == null || isNaN(v) ? '—' : nf1.format(v) + ' %'; }
+  function ruDate(key) { if (!key) return ''; var p = key.split('-'); return p[2] + '.' + p[1] + '.' + p[0]; }
+  function short(key) { var p = key.split('-'); return p[2] + '.' + p[1]; }
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+  var toastTimer;
+  function toast(text) {
+    var t = document.getElementById('toast');
+    t.textContent = text; t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+  function fail(e) { toast(e.message || String(e)); }
+
+  /* ───── Тонкие контурные иконки, как на слайдах ───── */
+  var ICON = {
+    summary: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    tasks: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    products: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+    templates: '<path d="M4 5h16v11H9l-5 4V5z"/><path d="M8 9h8M8 12h5"/>',
+    calc: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 18h.01M12 18h4"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z"/>',
+    exit: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    ok: '<path d="M5 12l4 4 10-10"/>',
+    warn: '<path d="M12 4l9 16H3L12 4z"/><path d="M12 10v4M12 17h.01"/>',
+    stop: '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>',
+    dot: '<circle cx="12" cy="12" r="4"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>'
+  };
+  function icon(name) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[name] + '</svg>';
+  }
+  function badge(kind, text) {
+    var ic = { good: 'ok', warn: 'warn', crit: 'stop', info: 'dot' }[kind];
+    return '<span class="badge b-' + kind + '">' + icon(ic) + esc(text) + '</span>';
+  }
+
+  var BRAND = '<div class="brand-mark"><div class="logo">HOK\'S LOVE</div>' +
+              '<div class="tag">Украшай себя с любовью</div><div class="line"></div></div>';
+
+  /* ───── Вход ───── */
+  function renderLogin(message) {
+    state.view = null;
+    app.innerHTML =
+      '<div class="login-wrap"><form class="login-card" id="loginForm" autocomplete="on">' + BRAND +
+      '<label for="lg">Логин</label><input id="lg" name="username" autocomplete="username" required>' +
+      '<label for="pw">Пароль</label><input id="pw" name="password" type="password" autocomplete="current-password" required>' +
+      '<button class="btn" type="submit">Войти</button>' +
+      '<div class="err" id="err">' + esc(message || '') + '</div>' +
+      '<div class="hint">Рабочая система команды. Пароль выдаёт владелец.</div>' +
+      '</form></div>';
+    $('#loginForm').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var btn = $('#loginForm .btn'); btn.disabled = true; btn.textContent = 'Проверяем…';
+      run('login', $('#lg').value, $('#pw').value).then(function (r) {
+        if (!r.ok) { btn.disabled = false; btn.textContent = 'Войти'; $('#err').textContent = r.error; return; }
+        state.token = r.token; state.user = r.user;
+        store('session', 'hl_token', r.token);
+        start();
+      }).catch(function (e) { btn.disabled = false; btn.textContent = 'Войти'; $('#err').textContent = e.message; });
+    });
+  }
+
+  function renderChangePassword(first) {
+    app.innerHTML =
+      '<div class="login-wrap"><form class="login-card" id="pwForm">' + BRAND +
+      (first ? '<div class="hint" style="margin:0 0 6px;color:#cfcac0">Вы вошли по временному паролю. Придумайте свой — не короче 8 символов.</div>' : '') +
+      '<label for="op">Текущий пароль</label><input id="op" type="password" autocomplete="current-password" required>' +
+      '<label for="np">Новый пароль</label><input id="np" type="password" autocomplete="new-password" minlength="8" required>' +
+      '<label for="np2">Новый пароль ещё раз</label><input id="np2" type="password" autocomplete="new-password" minlength="8" required>' +
+      '<button class="btn" type="submit">Сохранить пароль</button>' +
+      (first ? '' : '<button class="btn ghost" type="button" id="pwBack" style="width:100%;margin-top:10px;color:#ecebe8;border-color:#45474e">Назад</button>') +
+      '<div class="err" id="err"></div></form></div>';
+    if (!first) $('#pwBack').onclick = function () { start(); };
+    $('#pwForm').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if ($('#np').value !== $('#np2').value) { $('#err').textContent = 'Новые пароли не совпадают'; return; }
+      run('changePassword', state.token, $('#op').value, $('#np').value).then(function (r) {
+        if (!r.ok) { $('#err').textContent = r.error; return; }
+        state.user = r.user; toast('Пароль изменён'); start();
+      }).catch(function (e) { $('#err').textContent = e.message; });
+    });
+  }
+
+  function signOut(expired) {
+    if (state.token && !expired) run('logout', state.token).catch(function () {});
+    store('session', 'hl_token', null);
+    state.token = null; state.user = null; state.cache = {};
+    renderLogin(expired ? 'Сессия закончилась, войдите снова' : '');
+  }
+
+  /* ───── Каркас ───── */
+  var NAV = [
+    ['summary', 'Сводка'], ['tasks', 'Задачи'], ['products', 'Товары и склад'],
+    ['templates', 'Шаблоны ответов'], ['calc', 'Калькулятор']
+  ];
+
+  function start() {
+    if (state.user.mustChange) { renderChangePassword(true); return; }
+    var allowed = NAV.filter(function (n) { return state.user.sections.indexOf(n[0]) >= 0; });
+    app.innerHTML =
+      '<div class="layout"><aside class="side">' + BRAND +
+      '<nav class="nav">' + allowed.map(function (n) {
+        return '<button data-view="' + n[0] + '">' + icon(n[0]) + '<span>' + n[1] + '</span></button>';
+      }).join('') + '</nav>' +
+      '<div class="foot"><b>' + esc(state.user.name) + '</b>' + esc(state.user.role) +
+      '<div style="margin-top:10px"><a href="#" id="chpw" style="color:inherit">Сменить пароль</a></div></div>' +
+      '</aside><main class="main"><div class="topbar"><h1 id="title"></h1>' +
+      '<button class="icon-btn" id="themeBtn" title="Светлая или тёмная тема" aria-label="Сменить тему"></button>' +
+      '<button class="icon-btn" id="exitBtn" title="Выйти" aria-label="Выйти">' + icon('exit') + '</button>' +
+      '</div><div id="view"></div></main></div>';
+    $$('.nav button').forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-view')); }; });
+    $('#themeBtn').onclick = function () { toggleTheme(); themeIcon(); };
+    $('#exitBtn').onclick = function () { signOut(false); };
+    $('#chpw').onclick = function (e) { e.preventDefault(); renderChangePassword(false); };
+    themeIcon();
+    go(allowed.length ? allowed[0][0] : null);
+  }
+  function themeIcon() {
+    $('#themeBtn').innerHTML = icon(document.documentElement.getAttribute('data-theme') === 'dark' ? 'sun' : 'moon');
+  }
+
+  function go(view) {
+    if (!view) { $('#view').innerHTML = '<div class="empty">Для вашей роли разделы не настроены</div>'; return; }
+    state.view = view;
+    $$('.nav button').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === view); });
+    var titles = {
+      summary: 'Сводка <span class="serif">по магазину</span>',
+      tasks: 'Задачи <span class="serif">команды</span>',
+      products: 'Товары <span class="serif">и склад</span>',
+      templates: 'Шаблоны <span class="serif">ответов покупателям</span>',
+      calc: 'Калькулятор <span class="serif">одной продажи</span>'
+    };
+    $('#title').className = 'caps';
+    $('#title').innerHTML = titles[view];
+    $('#view').innerHTML = '<div class="loading">Загружаем…</div>';
+    VIEWS[view].show();
+  }
+
+  /* ════════════════ СВОДКА ════════════════ */
+  var summaryState = { days: 7, mp: 'all', data: null };
+
+  function deltaHtml(now, prev, lowerIsBetter) {
+    if (now == null || prev == null || !prev) return '<div class="delta">нет данных для сравнения</div>';
+    var d = (now - prev) / prev * 100;
+    var good = lowerIsBetter ? d < 0 : d > 0;
+    var cls = Math.abs(d) < 0.05 ? '' : (good ? 'up' : 'down');
+    return '<div class="delta"><span class="' + cls + '">' + (d > 0 ? '▲ +' : d < 0 ? '▼ ' : '') + n1(d) + ' %</span> к прошлому периоду</div>';
+  }
+  function pointsHtml(now, prev) {
+    if (now == null || prev == null) return '<div class="delta">нет данных для сравнения</div>';
+    var d = now - prev;
+    return '<div class="delta"><span class="' + (d >= 0 ? 'up' : 'down') + '">' + (d >= 0 ? '+' : '') + n1(d) +
+           ' пункта</span> к прошлому периоду</div>';
+  }
+  function tile(label, value, delta) {
+    return '<div class="tile"><div class="label">' + label + '</div><div class="value num">' + value + '</div>' + delta + '</div>';
+  }
+
+  VIEWS.summary = {
+    show: function () {
+      call('summary', { days: summaryState.days }).then(function (d) {
+        summaryState.data = d; VIEWS.summary.draw();
+      }).catch(fail);
+    },
+    redraw: function () { if (summaryState.data) VIEWS.summary.draw(); },
+    draw: function () {
+      var d = summaryState.data, v = $('#view');
+      var filters =
+        '<div class="filters"><div class="seg" id="segDays">' + [7, 14, 30, 90].map(function (x) {
+          return '<button data-d="' + x + '" class="' + (x === summaryState.days ? 'on' : '') + '">' + x + ' дней</button>';
+        }).join('') + '</div><div class="seg" id="segMp">' +
+        [['all', 'Все площадки'], ['wb', 'Wildberries'], ['ozon', 'Ozon']].map(function (x) {
+          return '<button data-m="' + x[0] + '" class="' + (x[0] === summaryState.mp ? 'on' : '') + '">' + x[1] + '</button>';
+        }).join('') + '</div>' +
+        (d.empty ? '' : '<span class="muted grow" style="text-align:right;font-size:12px">' + ruDate(d.from) + ' — ' + ruDate(d.to) + '</span>') + '</div>';
+
+      if (d.empty) {
+        v.innerHTML = filters + '<div class="card empty"><span class="serif">Данных пока нет</span>' +
+          'Заполните листы «01_Показатели_WB» и «02_Показатели_Ozon» в рабочей таблице.</div>';
+        bindSummaryFilters(); return;
+      }
+      var m = d[summaryState.mp], a = m.now, p = m.prev;
+      var tiles = [
+        tile('Заказы, шт', n0(a.orders), deltaHtml(a.orders, p.orders)),
+        d.money ? tile('Заказы, ₽', rub(a.ordersSum), deltaHtml(a.ordersSum, p.ordersSum)) : '',
+        tile('Выкупы, шт', n0(a.buyouts), deltaHtml(a.buyouts, p.buyouts)),
+        tile('Процент выкупа', pct(a.buyoutRate), pointsHtml(a.buyoutRate, p.buyoutRate)),
+        d.money ? tile('Средний чек', rub(a.avgCheck), deltaHtml(a.avgCheck, p.avgCheck)) : '',
+        d.money ? tile('Расходы на рекламу', rub(a.ads), deltaHtml(a.ads, p.ads, true)) : '',
+        d.money ? tile('Доля рекламных расходов', pct(a.adShare), pointsHtml(a.adShare, p.adShare)) : ''
+      ].join('');
+
+      var funnel =
+        '<div class="card" style="margin-bottom:14px"><h2 class="caps">Воронка</h2><div class="funnel">' +
+        step('Показы', a.impressions, '') +
+        step('Переходы в карточку', a.clicks, 'Кликабельность ' + pct(a.ctr)) +
+        step('Добавления в корзину', a.carts, 'Конверсия в корзину ' + pct(a.cartRate)) +
+        step('Заказы', a.orders, 'Конверсия в заказ ' + pct(a.orderRate)) +
+        '</div></div>';
+
+      var mpName = { all: 'обе площадки', wb: 'Wildberries', ozon: 'Ozon' }[summaryState.mp];
+      var chart =
+        '<div class="card"><h2 class="caps">Заказы по дням, шт <span class="serif" style="font-size:15px">— ' + mpName + '</span></h2>' +
+        '<div class="chart-wrap" id="chart"></div>' +
+        '<details class="more"><summary>Показать таблицей</summary><div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Дата</th><th class="r">Wildberries, шт</th><th class="r">Ozon, шт</th><th class="r">Всего, шт</th></tr></thead><tbody>' +
+        d.series.slice().reverse().map(function (s) {
+          return '<tr><td>' + ruDate(s.date) + '</td><td class="r num">' + n0(s.wb) + '</td><td class="r num">' + n0(s.ozon) + '</td><td class="r num">' + n0(s.wb + s.ozon) + '</td></tr>';
+        }).join('') + '</tbody></table></div></details>' +
+        '<details class="more"><summary>Как считаются показатели</summary><div class="formula" style="margin-top:10px">' +
+        'Кликабельность = Переходы в карточку ÷ Показы × 100 %\n' +
+        'Конверсия в корзину = Добавления в корзину ÷ Переходы × 100 %\n' +
+        'Конверсия в заказ = Заказы ÷ Добавления в корзину × 100 %\n' +
+        'Процент выкупа = Выкупы, шт ÷ Заказы, шт × 100 %\n' +
+        (d.money ? 'Средний чек = Заказы, ₽ ÷ Заказы, шт\nДоля рекламных расходов = Расходы на рекламу ÷ Заказы, ₽ × 100 %\n' : '') +
+        'Сравнение — с таким же числом дней перед выбранным периодом.\n' +
+        'Процент выкупа за последние дни занижен: часть заказов ещё едет к покупателю.</div></details></div>';
+
+      v.innerHTML = filters + '<div class="grid tiles">' + tiles + '</div>' + funnel + chart;
+      bindSummaryFilters();
+      drawBars($('#chart'), d.series.map(function (s) {
+        var val = summaryState.mp === 'all' ? s.wb + s.ozon : s[summaryState.mp];
+        return { key: s.date, value: val };
+      }));
+    }
+  };
+  function step(label, value, conv) {
+    return '<div class="step"><div class="tile" style="border:0;padding:0;background:none"><div class="label">' + label +
+           '</div></div><div class="value num">' + n0(value) + '</div><div class="conv">' + (conv || '&nbsp;') + '</div></div>';
+  }
+  function bindSummaryFilters() {
+    $$('#segDays button').forEach(function (b) {
+      b.onclick = function () { summaryState.days = Number(b.getAttribute('data-d')); $('#view').innerHTML = '<div class="loading">Загружаем…</div>'; VIEWS.summary.show(); };
+    });
+    $$('#segMp button').forEach(function (b) {
+      b.onclick = function () { summaryState.mp = b.getAttribute('data-m'); VIEWS.summary.draw(); };
+    });
+  }
+
+  /* Столбики: тонкие, скруглённые сверху, подсказка при наведении */
+  function drawBars(el, data) {
+    var W = el.clientWidth || 600, H = 240, padL = 44, padB = 26, padT = 12, padR = 8;
+    var max = Math.max.apply(null, data.map(function (d) { return d.value; }).concat([1]));
+    var stepY = niceStep(max / 4), top = Math.ceil(max / stepY) * stepY || 1;
+    var iw = W - padL - padR, ih = H - padT - padB, bw = iw / data.length;
+    var barW = Math.max(2, Math.min(28, bw - 2));
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Заказы по дням">';
+    for (var g = 0; g <= top; g += stepY) {
+      var y = padT + ih - g / top * ih;
+      svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="var(--grid)" stroke-width="1"/>' +
+             '<text x="' + (padL - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="10" fill="var(--muted)">' + n0(g) + '</text>';
+    }
+    var labelEvery = Math.ceil(data.length / 10);
+    data.forEach(function (d, i) {
+      var h = d.value / top * ih, x = padL + i * bw + (bw - barW) / 2, y = padT + ih - h, r = Math.min(4, barW / 2, h);
+      var path = h > 0 ? 'M' + x + ',' + (padT + ih) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y +
+        'H' + (x + barW - r) + 'Q' + (x + barW) + ',' + y + ' ' + (x + barW) + ',' + (y + r) + 'V' + (padT + ih) + 'Z' : '';
+      svg += '<g class="bar" data-i="' + i + '"><rect x="' + (padL + i * bw) + '" y="' + padT + '" width="' + bw + '" height="' + ih + '" fill="transparent"/>' +
+             (path ? '<path d="' + path + '" fill="var(--chart)"/>' : '') + '</g>';
+      if (i % labelEvery === 0) svg += '<text x="' + (x + barW / 2) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--muted)">' + short(d.key) + '</text>';
+    });
+    svg += '</svg><div class="tooltip" id="tip"></div>';
+    el.innerHTML = svg;
+    var tip = $('#tip', el);
+    $$('.bar', el).forEach(function (g) {
+      g.addEventListener('mouseenter', function () {
+        var i = Number(g.getAttribute('data-i')), d = data[i], p = g.querySelector('path');
+        if (p) p.setAttribute('fill', 'var(--chart-hover)');
+        var box = el.getBoundingClientRect(), gb = g.getBoundingClientRect();
+        tip.innerHTML = '<b>' + ruDate(d.key) + '</b><br>' + n0(d.value) + ' шт';
+        tip.style.left = (gb.left - box.left + gb.width / 2) + 'px';
+        tip.style.top = (padT + ih - d.value / top * ih) / H * box.height + 'px';
+        tip.style.display = 'block';
+      });
+      g.addEventListener('mouseleave', function () {
+        var p = g.querySelector('path'); if (p) p.setAttribute('fill', 'var(--chart)');
+        tip.style.display = 'none';
+      });
+    });
+  }
+  function niceStep(raw) {
+    if (raw <= 0) return 1;
+    var pow = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / pow;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+  }
+
+  /* ════════════════ ЗАДАЧИ ════════════════ */
+  var taskState = { data: null, mine: false, q: '', showCancelled: false };
+  var PRIORITY_BADGE = { 'Срочно': 'crit', 'Высокий': 'warn', 'Обычный': 'info', 'Низкий': 'info' };
+
+  function todayKey() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function userName(login) {
+    var u = (taskState.data.users || []).filter(function (x) { return x.login === login; })[0];
+    return u ? u.name : (login || 'не назначен');
+  }
+  function canEdit(t) {
+    return state.user.allTasks || t.assignee === state.user.login || t.author === state.user.login;
+  }
+
+  VIEWS.tasks = {
+    show: function () {
+      call('tasks').then(function (d) { taskState.data = d; VIEWS.tasks.draw(); }).catch(fail);
+    },
+    draw: function () {
+      var d = taskState.data, v = $('#view'), q = taskState.q.toLowerCase(), today = todayKey();
+      var list = d.tasks.filter(function (t) {
+        if (taskState.mine && t.assignee !== state.user.login) return false;
+        if (q && (t.title + ' ' + t.description + ' ' + t.section).toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+      var cols = d.statuses.filter(function (s) { return s !== 'Отменена' || taskState.showCancelled; });
+      var cancelledCount = list.filter(function (t) { return t.status === 'Отменена'; }).length;
+      var overdue = list.filter(function (t) { return t.due && t.due < today && t.status !== 'Готово' && t.status !== 'Отменена'; }).length;
+
+      v.innerHTML =
+        '<div class="filters"><button class="btn" id="newTask">' + icon('plus') + 'Новая задача</button>' +
+        '<div class="seg" id="segMine"><button data-m="0" class="' + (!taskState.mine ? 'on' : '') + '">Все задачи</button>' +
+        '<button data-m="1" class="' + (taskState.mine ? 'on' : '') + '">Мои задачи</button></div>' +
+        '<input class="input search" id="tq" placeholder="Поиск по задачам" value="' + esc(taskState.q) + '">' +
+        '<span class="grow"></span>' +
+        (overdue ? badge('crit', 'Просрочено: ' + overdue) : '') +
+        (cancelledCount ? '<button class="btn ghost small" id="toggleCancelled">' + (taskState.showCancelled ? 'Скрыть отменённые' : 'Отменённые: ' + cancelledCount) + '</button>' : '') +
+        '</div>' +
+        '<div class="board" style="--cols:' + cols.length + '">' + cols.map(function (s) {
+          var items = list.filter(function (t) { return t.status === s; }).sort(function (a, b) {
+            return (d.priorities.indexOf(a.priority) - d.priorities.indexOf(b.priority)) || String(a.due || '9').localeCompare(String(b.due || '9'));
+          });
+          return '<div class="col"><div class="col-head caps"><span>' + s + '</span><span class="chip">' + items.length + '</span></div>' +
+            (items.length ? items.map(function (t) {
+              var late = t.due && t.due < today && s !== 'Готово' && s !== 'Отменена';
+              return '<div class="task" data-id="' + t.id + '"><div class="t">' + esc(t.title) + '</div><div class="meta">' +
+                badge(PRIORITY_BADGE[t.priority] || 'info', t.priority) + '<span class="chip">' + esc(t.section) + '</span></div>' +
+                '<div class="meta" style="margin-top:8px"><span>' + esc(userName(t.assignee)) + '</span>' +
+                (t.due ? '<span style="margin-left:auto" class="' + (late ? '' : '') + '">' + (late ? badge('crit', 'срок ' + ruDate(t.due)) : 'до ' + ruDate(t.due)) + '</span>' : '') +
+                '</div></div>';
+            }).join('') : '<div class="muted" style="padding:8px 6px;font-size:12px">Пусто</div>') + '</div>';
+        }).join('') + '</div>';
+
+      $('#newTask').onclick = function () { taskModal(null); };
+      $$('#segMine button').forEach(function (b) { b.onclick = function () { taskState.mine = b.getAttribute('data-m') === '1'; VIEWS.tasks.draw(); }; });
+      $('#tq').oninput = function (e) {
+        taskState.q = e.target.value; var pos = e.target.selectionStart;
+        VIEWS.tasks.draw(); var i = $('#tq'); i.focus(); i.setSelectionRange(pos, pos);
+      };
+      if ($('#toggleCancelled')) $('#toggleCancelled').onclick = function () { taskState.showCancelled = !taskState.showCancelled; VIEWS.tasks.draw(); };
+      $$('.task').forEach(function (el) {
+        el.onclick = function () {
+          var id = Number(el.getAttribute('data-id'));
+          taskModal(d.tasks.filter(function (t) { return t.id === id; })[0]);
+        };
+      });
+    }
+  };
+
+  function options(list, selected, labels) {
+    return list.map(function (x, i) {
+      return '<option value="' + esc(x) + '"' + (x === selected ? ' selected' : '') + '>' + esc(labels ? labels[i] : x) + '</option>';
+    }).join('');
+  }
+
+  function taskModal(t) {
+    var d = taskState.data, isNew = !t;
+    t = t || { title: '', description: '', section: 'Другое', assignee: state.user.login, due: '', priority: 'Обычный', status: 'Новая', comments: '' };
+    var editable = isNew || canEdit(t);
+    var dis = editable ? '' : ' disabled';
+    var bg = document.createElement('div');
+    bg.className = 'modal-bg';
+    bg.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true"><h2 class="caps">' + (isNew ? 'Новая задача' : 'Задача № ' + t.id) + '</h2>' +
+      '<div class="form-grid">' +
+      '<div class="field full"><label>Название</label><input class="input" id="fTitle" value="' + esc(t.title) + '"' + dis + '></div>' +
+      '<div class="field full"><label>Описание</label><textarea class="input" id="fDesc" rows="3"' + dis + '>' + esc(t.description) + '</textarea></div>' +
+      '<div class="field"><label>Исполнитель</label><select class="input" id="fAssignee"' + dis + '>' +
+        options(d.users.map(function (u) { return u.login; }), t.assignee, d.users.map(function (u) { return u.name; })) + '</select></div>' +
+      '<div class="field"><label>Срок</label><input class="input" type="date" id="fDue" value="' + esc(t.due) + '"' + dis + '></div>' +
+      '<div class="field"><label>Раздел</label><select class="input" id="fSection"' + dis + '>' + options(d.sections, t.section) + '</select></div>' +
+      '<div class="field"><label>Приоритет</label><select class="input" id="fPriority"' + dis + '>' + options(d.priorities, t.priority) + '</select></div>' +
+      '<div class="field full"><label>Статус</label><div class="seg" id="fStatus">' + d.statuses.map(function (s) {
+        return '<button type="button" data-s="' + s + '" class="' + (s === t.status ? 'on' : '') + '"' + dis + '>' + s + '</button>';
+      }).join('') + '</div></div>' +
+      (isNew ? '' :
+        '<div class="field full"><label>Комментарии</label><div class="comments" id="fComments">' + (t.comments ? esc(t.comments) : '<span class="muted">Комментариев пока нет</span>') + '</div>' +
+        (editable ? '<div style="display:flex;gap:8px;margin-top:8px"><input class="input" id="fComment" placeholder="Написать комментарий"><button class="btn ghost small" id="fSend" type="button">Отправить</button></div>' : '') + '</div>' +
+        '<div class="full muted" style="font-size:12px">Создал: ' + esc(userName(t.author)) + (t.created ? ' · ' + esc(t.created) : '') + (t.updated ? ' · изменена ' + esc(t.updated) : '') + '</div>') +
+      '</div><div class="actions"><button class="btn ghost" id="fClose" type="button">Закрыть</button>' +
+      (editable ? '<button class="btn" id="fSave" type="button">Сохранить</button>' : '') + '</div>' +
+      (editable ? '' : '<div class="muted" style="font-size:12px;margin-top:10px">Менять задачу могут автор, исполнитель или руководитель.</div>') +
+      '</div>';
+    document.body.appendChild(bg);
+    var status = t.status;
+    function close() { bg.remove(); document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKey);
+    bg.addEventListener('click', function (e) { if (e.target === bg) close(); });
+    $('#fClose', bg).onclick = close;
+    $$('#fStatus button', bg).forEach(function (b) {
+      b.onclick = function () { status = b.getAttribute('data-s'); $$('#fStatus button', bg).forEach(function (x) { x.classList.toggle('on', x === b); }); };
+    });
+    if ($('#fSend', bg)) $('#fSend', bg).onclick = function () {
+      var text = $('#fComment', bg).value.trim(); if (!text) return;
+      call('addComment', { id: t.id, text: text }).then(function (r) {
+        t.comments = r.comments; $('#fComments', bg).textContent = r.comments; $('#fComment', bg).value = '';
+      }).catch(fail);
+    };
+    if ($('#fSave', bg)) $('#fSave', bg).onclick = function () {
+      var payload = {
+        id: t.id || null, title: $('#fTitle', bg).value, description: $('#fDesc', bg).value,
+        assignee: $('#fAssignee', bg).value, due: $('#fDue', bg).value, section: $('#fSection', bg).value,
+        priority: $('#fPriority', bg).value, status: status
+      };
+      if (!payload.title.trim()) { toast('Укажите название задачи'); return; }
+      $('#fSave', bg).disabled = true;
+      call('saveTask', payload).then(function () { close(); toast('Задача сохранена'); VIEWS.tasks.show(); })
+        .catch(function (e) { $('#fSave', bg).disabled = false; fail(e); });
+    };
+    setTimeout(function () { var f = $('#fTitle', bg); if (f && editable) f.focus(); }, 30);
+  }
+
+  /* ════════════════ ТОВАРЫ И СКЛАД ════════════════ */
+  var prodState = { data: null, q: '', status: '', category: '' };
+  var STOCK_BADGE = { 'Дефицит': 'crit', 'Нет в наличии': 'crit', 'Избыток': 'warn', 'Нет продаж': 'warn', 'Норма': 'good' };
+
+  VIEWS.products = {
+    show: function () { call('products').then(function (d) { prodState.data = d; VIEWS.products.draw(); }).catch(fail); },
+    draw: function () {
+      var d = prodState.data, v = $('#view'), q = prodState.q.toLowerCase();
+      if (!d.items.length) {
+        v.innerHTML = '<div class="card empty"><span class="serif">Товаров пока нет</span>Заполните лист «03_Товары» в рабочей таблице.</div>';
+        return;
+      }
+      var counts = {};
+      d.items.forEach(function (i) { counts[i.status] = (counts[i.status] || 0) + 1; });
+      var cats = d.items.map(function (i) { return i.category; }).filter(function (c, i, a) { return c && a.indexOf(c) === i; });
+      var list = d.items.filter(function (i) {
+        if (prodState.status && i.status !== prodState.status) return false;
+        if (prodState.category && i.category !== prodState.category) return false;
+        if (q && (i.title + ' ' + i.sku + ' ' + i.wbSku + ' ' + i.ozonSku).toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+      var statuses = ['Дефицит', 'Нет в наличии', 'Избыток', 'Нет продаж', 'Норма'];
+      var totalStock = d.items.reduce(function (s, i) { return s + i.total; }, 0);
+      var totalPerDay = d.items.reduce(function (s, i) { return s + i.perDay; }, 0);
+
+      v.innerHTML =
+        '<div class="grid status-tiles">' +
+        '<div class="tile"><div class="label">Остаток всего, шт</div><div class="value num">' + n0(totalStock) + '</div>' +
+        '<div class="delta">запас ' + (totalPerDay ? n0(totalStock / totalPerDay) + ' дней' : '—') + '</div></div>' +
+        statuses.map(function (s) {
+          return '<button class="tile' + (prodState.status === s ? ' on' : '') + '" data-s="' + s + '"><div class="label">' + s + '</div>' +
+                 '<div class="value num">' + (counts[s] || 0) + '</div><div class="delta">' + badge(STOCK_BADGE[s], 'артикулов') + '</div></button>';
+        }).join('') + '</div>' +
+        '<div class="filters"><input class="input search" id="pq" placeholder="Поиск: название или артикул" value="' + esc(prodState.q) + '">' +
+        '<select class="input" id="pc" style="max-width:220px"><option value="">Все категории</option>' + options(cats, prodState.category) + '</select>' +
+        (prodState.status ? '<button class="btn ghost small" id="pReset">Сбросить фильтр «' + esc(prodState.status) + '»</button>' : '') +
+        '<span class="grow"></span><span class="muted" style="font-size:12px">Дефицит — запаса меньше ' + n0(d.deficit) + ' дней, избыток — больше ' + n0(d.surplus) + ' дней</span></div>' +
+        '<div class="table-wrap"><table><thead><tr>' +
+        '<th>Артикул</th><th>Название</th>' +
+        (d.money ? '<th class="r">Цена со скидкой</th>' : '') + (d.cost ? '<th class="r">Себестоимость</th>' : '') +
+        '<th class="r">Остаток, шт</th>' +
+        '<th class="r">В день</th><th class="r">Запас, дней</th><th>Состояние</th></tr></thead><tbody>' +
+        (list.length ? list.map(function (i) {
+          return '<tr><td><b>' + esc(i.sku) + '</b><div class="muted" style="font-size:11px">' + (i.wbSku ? 'Wildberries ' + esc(i.wbSku) : '') + (i.ozonSku ? '<br>Ozon ' + esc(i.ozonSku) : '') + '</div></td>' +
+            '<td class="wrap">' + esc(i.title) + '<div class="muted" style="font-size:11px">' + esc([i.category, i.material].filter(Boolean).join(' · ')) + '</div></td>' +
+            (d.money ? '<td class="r num">' + rub(i.salePrice) + '<div class="muted" style="font-size:11px">' + rub(i.price) + ' − ' + n0(i.discount) + ' %</div></td>' : '') +
+            (d.cost ? '<td class="r num">' + rub(i.cost) + '</td>' : '') +
+            '<td class="r num"><b>' + n0(i.total) + '</b><div class="muted" style="font-size:11px">свой склад ' + n0(i.own) + '<br>Wildberries ' + n0(i.wb) + ' · Ozon ' + n0(i.ozon) + '</div></td><td class="r num">' + n1(i.perDay) + '</td>' +
+            '<td class="r num">' + (i.daysLeft == null ? '—' : n0(i.daysLeft)) + '</td><td>' + badge(STOCK_BADGE[i.status], i.status) + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="empty">Ничего не найдено</td></tr>') +
+        '</tbody></table></div>' +
+        '<details class="more"><summary>Как считается</summary><div class="formula" style="margin-top:10px">' +
+        'Остаток всего = Свой склад + Склады Wildberries + Склады Ozon\n' +
+        'Запас, дней = Остаток всего ÷ Средние заказы в день\n' +
+        (d.money ? 'Цена со скидкой = Цена до скидки × (1 − Скидка продавца ÷ 100)\n' : '') +
+        'Пороги дефицита и избытка меняются на листе «90_Параметры».</div></details>';
+
+      $$('.status-tiles button').forEach(function (b) {
+        b.onclick = function () { var s = b.getAttribute('data-s'); prodState.status = prodState.status === s ? '' : s; VIEWS.products.draw(); };
+      });
+      $('#pq').oninput = function (e) {
+        prodState.q = e.target.value; var pos = e.target.selectionStart;
+        VIEWS.products.draw(); var i = $('#pq'); i.focus(); i.setSelectionRange(pos, pos);
+      };
+      $('#pc').onchange = function (e) { prodState.category = e.target.value; VIEWS.products.draw(); };
+      if ($('#pReset')) $('#pReset').onclick = function () { prodState.status = ''; VIEWS.products.draw(); };
+    }
+  };
+
+  /* ════════════════ ШАБЛОНЫ ОТВЕТОВ ════════════════ */
+  var tplState = { data: null, q: '', type: '', mp: '' };
+
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('Текст скопирован'); } catch (e) { toast('Не удалось скопировать — выделите текст вручную'); }
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast('Текст скопирован'); }, fallback);
+    } else fallback();
+  }
+
+  VIEWS.templates = {
+    show: function () { call('templates').then(function (d) { tplState.data = d; VIEWS.templates.draw(); }).catch(fail); },
+    draw: function () {
+      var d = tplState.data, v = $('#view'), q = tplState.q.toLowerCase();
+      var list = d.filter(function (t) {
+        if (tplState.type && t.type !== tplState.type) return false;
+        if (tplState.mp && t.marketplace !== tplState.mp) return false;
+        if (q && (t.situation + ' ' + t.text).toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+      v.innerHTML =
+        '<div class="filters"><input class="input search" id="tq2" placeholder="Поиск: ситуация или слово из текста" value="' + esc(tplState.q) + '">' +
+        '<div class="seg" id="segType">' + [['', 'Все'], ['Отзыв', 'Отзывы'], ['Вопрос', 'Вопросы']].map(function (x) {
+          return '<button data-t="' + x[0] + '" class="' + (tplState.type === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
+        }).join('') + '</div><div class="seg" id="segTplMp">' + [['', 'Обе площадки'], ['Wildberries', 'Wildberries'], ['Ozon', 'Ozon']].map(function (x) {
+          return '<button data-m="' + x[0] + '" class="' + (tplState.mp === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
+        }).join('') + '</div><span class="grow"></span><span class="muted" style="font-size:12px">Найдено: ' + list.length + '</span></div>' +
+        (list.length ? '<div class="tpl-list">' + list.map(function (t, i) {
+          return '<div class="card tpl"><div class="head"><span class="chip">' + esc(t.marketplace || 'Обе площадки') + '</span>' +
+            '<span class="chip">' + esc(t.type) + '</span>' + (t.rating ? badge(Number(t.rating) >= 4 ? 'good' : Number(t.rating) === 3 ? 'warn' : 'crit', 'Оценка ' + t.rating) : '') +
+            '</div><div style="font-weight:500;margin-bottom:8px">' + esc(t.situation) + '</div><div class="text">' + esc(t.text) + '</div>' +
+            '<div class="foot"><button class="btn ghost small" data-copy="' + i + '">' + icon('copy') + 'Скопировать</button></div></div>';
+        }).join('') + '</div>' :
+          '<div class="card empty"><span class="serif">Шаблонов не найдено</span>Шаблоны хранятся на листе «05_Шаблоны_ответов».</div>');
+      $('#tq2').oninput = function (e) {
+        tplState.q = e.target.value; var pos = e.target.selectionStart;
+        VIEWS.templates.draw(); var i = $('#tq2'); i.focus(); i.setSelectionRange(pos, pos);
+      };
+      $$('#segType button').forEach(function (b) { b.onclick = function () { tplState.type = b.getAttribute('data-t'); VIEWS.templates.draw(); }; });
+      $$('#segTplMp button').forEach(function (b) { b.onclick = function () { tplState.mp = b.getAttribute('data-m'); VIEWS.templates.draw(); }; });
+      $$('[data-copy]').forEach(function (b) { b.onclick = function () { copyText(list[Number(b.getAttribute('data-copy'))].text); }; });
+    }
+  };
+
+  /* ════════════════ КАЛЬКУЛЯТОР ════════════════ */
+  var calcState = { params: null, mp: 'wb', mode: 'profit', values: null };
+  var CALC_FIELDS = [
+    ['price', 'Цена до скидки, ₽', ''], ['discount', 'Скидка продавца, %', ''], ['cost', 'Себестоимость закупки, ₽', ''],
+    ['komissiya', 'Комиссия, %', 'komissiya'], ['ekvairing', 'Эквайринг, %', 'ekvairing'], ['nalog', 'Налог, %', 'nalog'],
+    ['logistika', 'Логистика, ₽ за штуку', 'logistika'], ['hranenie', 'Хранение, ₽ за штуку', 'hranenie'],
+    ['priemka', 'Приёмка, ₽ за штуку', 'priemka'], ['uderzhaniya', 'Удержания, ₽ за штуку', 'uderzhaniya'],
+    ['reklama', 'Реклама, ₽ за штуку', 'reklama'], ['target', 'Желаемая прибыль с штуки, ₽', '']
+  ];
+
+  function calcDefaults() {
+    var p = calcState.params, out = {};
+    CALC_FIELDS.forEach(function (f) {
+      if (!f[2]) return;
+      var key = f[2] === 'nalog' ? 'nalog' : calcState.mp + '_' + f[2];
+      out[f[0]] = p[key] === '' || p[key] == null ? '' : p[key];
+    });
+    return out;
+  }
+
+  VIEWS.calc = {
+    show: function () {
+      call('params').then(function (p) {
+        calcState.params = p;
+        calcState.values = Object.assign({ price: '', discount: '', cost: '', target: 0 }, calcDefaults());
+        VIEWS.calc.draw();
+      }).catch(fail);
+    },
+    draw: function () {
+      var v = $('#view'), val = calcState.values, profit = calcState.mode === 'profit';
+      function field(f) {
+        if (f[0] === 'target' && profit) return '';
+        if (f[0] === 'discount' && !profit) return '';
+        return '<div class="field"><label for="c_' + f[0] + '">' + f[1] + '</label><input class="input num" id="c_' + f[0] + '" inputmode="decimal" value="' + esc(String(val[f[0]]).replace('.', ',')) + '"></div>';
+      }
+      v.innerHTML =
+        '<div class="filters"><div class="seg" id="segCalc">' +
+        '<button data-c="profit" class="' + (profit ? 'on' : '') + '">Прибыль с одной продажи</button>' +
+        '<button data-c="promo" class="' + (!profit ? 'on' : '') + '">Минимальная цена для акции</button></div>' +
+        '<div class="seg" id="segCalcMp"><button data-m="wb" class="' + (calcState.mp === 'wb' ? 'on' : '') + '">Wildberries</button>' +
+        '<button data-m="ozon" class="' + (calcState.mp === 'ozon' ? 'on' : '') + '">Ozon</button></div></div>' +
+        '<div class="calc"><div class="card"><h2 class="caps">Исходные данные</h2><div class="inputs">' +
+        (profit ? '<div class="row2">' + field(CALC_FIELDS[0]) + field(CALC_FIELDS[1]) + '</div>' : field(CALC_FIELDS[0])) + field(CALC_FIELDS[2]) +
+        '<div class="row2">' + field(CALC_FIELDS[3]) + field(CALC_FIELDS[4]) + '</div>' +
+        '<div class="row2">' + field(CALC_FIELDS[5]) + field(CALC_FIELDS[6]) + '</div>' +
+        '<div class="row2">' + field(CALC_FIELDS[7]) + field(CALC_FIELDS[8]) + '</div>' +
+        '<div class="row2">' + field(CALC_FIELDS[9]) + field(CALC_FIELDS[10]) + '</div>' + field(CALC_FIELDS[11]) +
+        '</div><div class="muted" style="font-size:12px;margin-top:12px">Ставки подставлены с листа «90_Параметры». Изменения здесь ничего не сохраняют — только считают.</div>' +
+        '<button class="btn ghost small" id="cReset" style="margin-top:12px">Вернуть ставки из параметров</button></div>' +
+        '<div class="card" id="cOut"></div></div>';
+      $$('#segCalc button').forEach(function (b) { b.onclick = function () { calcState.mode = b.getAttribute('data-c'); VIEWS.calc.draw(); }; });
+      $$('#segCalcMp button').forEach(function (b) {
+        b.onclick = function () { calcState.mp = b.getAttribute('data-m'); Object.assign(calcState.values, calcDefaults()); VIEWS.calc.draw(); };
+      });
+      $('#cReset').onclick = function () { Object.assign(calcState.values, calcDefaults()); VIEWS.calc.draw(); };
+      $$('.calc input').forEach(function (inp) {
+        inp.oninput = function () { calcState.values[inp.id.slice(2)] = inp.value.replace(/\s/g, '').replace(',', '.'); calcOut(); };
+      });
+      calcOut();
+    }
+  };
+
+  function calcOut() {
+    var val = calcState.values, out = $('#cOut'), profit = calcState.mode === 'profit', isWb = calcState.mp === 'wb';
+    var need = profit ? ['price', 'discount', 'cost'] : ['price', 'cost'];
+    var rates = ['komissiya', 'ekvairing', 'nalog', 'logistika', 'hranenie', 'priemka', 'uderzhaniya', 'reklama'];
+    var missing = need.concat(rates).filter(function (k) { return val[k] === '' || val[k] == null || isNaN(Number(val[k])); });
+    if (missing.length) {
+      var names = missing.map(function (k) { return CALC_FIELDS.filter(function (f) { return f[0] === k; })[0][1]; });
+      out.innerHTML = '<h2 class="caps">Результат</h2><div class="empty" style="padding:24px 0"><span class="serif">Не хватает данных</span>' +
+        'Заполните: ' + esc(names.join(', ')) + '.' + (!isWb ? '<br>Ставки Ozon пока не заданы на листе «90_Параметры».' : '') + '</div>';
+      return;
+    }
+    var x = {}; Object.keys(val).forEach(function (k) { x[k] = Number(val[k]) || 0; });
+    var fixed = x.logistika + x.hranenie + x.priemka + x.uderzhaniya + x.reklama;
+    var shareRate = (x.komissiya + x.ekvairing + x.nalog) / 100;
+
+    if (profit) {
+      var P = x.price * (1 - x.discount / 100);
+      var kom = P * x.komissiya / 100, ekv = P * x.ekvairing / 100, nal = P * x.nalog / 100;
+      var res = P - kom - ekv - x.logistika - x.hranenie - x.priemka - x.uderzhaniya - x.reklama - nal - x.cost;
+      var margin = P ? res / P * 100 : null, roi = x.cost ? res / x.cost * 100 : null;
+      var pessimistic = isWb ? res - P * 0.055 : null;
+      out.innerHTML =
+        '<h2 class="caps">Прибыль с одной продажи</h2>' +
+        '<div class="result-big num" style="color:' + (res >= 0 ? 'var(--good)' : 'var(--crit)') + '">' + rub2(res) + '</div>' +
+        '<div class="muted">' + badge(res >= 0 ? 'good' : 'crit', res >= 0 ? 'в плюсе' : 'в минусе') + ' Маржа ' + pct(margin) + ' · Рентабельность вложений ' + pct(roi) + '</div>' +
+        '<div class="formula" style="margin-top:16px">' +
+        'Цена продажи = ' + n2(x.price) + ' × (1 − ' + n2(x.discount) + ' ÷ 100) = <b>' + n2(P) + ' ₽</b>\n\n' +
+        '  Цена продажи                ' + n2(P) + ' ₽\n' +
+        '− Комиссия ' + n2(x.komissiya) + ' %            −' + n2(kom) + ' ₽\n' +
+        '− Эквайринг ' + n2(x.ekvairing) + ' %           −' + n2(ekv) + ' ₽\n' +
+        '− Логистика                  −' + n2(x.logistika) + ' ₽\n' +
+        '− Хранение                   −' + n2(x.hranenie) + ' ₽\n' +
+        '− Приёмка                    −' + n2(x.priemka) + ' ₽\n' +
+        '− Удержания                  −' + n2(x.uderzhaniya) + ' ₽\n' +
+        '− Реклама                    −' + n2(x.reklama) + ' ₽\n' +
+        '− Налог ' + n2(x.nalog) + ' % от цены     −' + n2(nal) + ' ₽\n' +
+        '− Себестоимость              −' + n2(x.cost) + ' ₽\n' +
+        '= Прибыль                    <b>' + n2(res) + ' ₽</b>\n\n' +
+        'Маржа = ' + n2(res) + ' ÷ ' + n2(P) + ' × 100 = ' + pct(margin) + '\n' +
+        'Рентабельность вложений = ' + n2(res) + ' ÷ ' + n2(x.cost) + ' × 100 = ' + pct(roi) + '</div>' +
+        (isWb ? '<div class="note"><b>Осторожно, деньги.</b> Комиссия ' + n2(x.komissiya) + ' % учитывает возврат 5,5 % по программе «Фиксированная ставка». ' +
+          'Если план оборота не выполнен, прибыль станет: ' + n2(res) + ' − ' + n2(P) + ' × 5,5 % = <b>' + rub2(pessimistic) + '</b>. ' +
+          'Налоговую базу и ставку сверьте с бухгалтером.</div>' : '<div class="note"><b>Осторожно, деньги.</b> Ставки Ozon проверьте по тарифам вашей категории. Налоговую базу и ставку сверьте с бухгалтером.</div>');
+    } else {
+      var minP = (x.cost + fixed + x.target) / (1 - shareRate);
+      var maxDisc = x.price ? (1 - minP / x.price) * 100 : null;
+      var ok = shareRate < 1;
+      out.innerHTML =
+        '<h2 class="caps">Минимальная цена для акции</h2>' +
+        (ok ? '<div class="result-big num">' + rub2(minP) + '</div>' +
+          '<div class="muted">Максимальная скидка продавца от ' + rub(x.price) + ': <b style="color:var(--text)">' + (maxDisc > 0 ? pct(maxDisc) : 'скидка невозможна') + '</b></div>' +
+          '<div class="formula" style="margin-top:16px">' +
+          'Минимальная цена = (Себестоимость + Логистика + Хранение + Приёмка + Удержания + Реклама + Желаемая прибыль)\n' +
+          '                   ÷ (1 − Комиссия − Эквайринг − Налог)\n\n' +
+          '= (' + n2(x.cost) + ' + ' + n2(x.logistika) + ' + ' + n2(x.hranenie) + ' + ' + n2(x.priemka) + ' + ' + n2(x.uderzhaniya) + ' + ' + n2(x.reklama) + ' + ' + n2(x.target) + ')\n' +
+          '  ÷ (1 − ' + n4(x.komissiya / 100) + ' − ' + n4(x.ekvairing / 100) + ' − ' + n4(x.nalog / 100) + ')\n' +
+          '= ' + n2(x.cost + fixed + x.target) + ' ÷ ' + n4(1 - shareRate) + ' = <b>' + n2(minP) + ' ₽</b>\n\n' +
+          'Максимальная скидка = (1 − ' + n2(minP) + ' ÷ ' + n2(x.price) + ') × 100 = <b>' + (maxDisc == null ? '—' : pct(maxDisc)) + '</b></div>' +
+          '<div class="note"><b>Осторожно, деньги.</b> Цена ниже минимальной — продажа в убыток. ' +
+          (isWb ? 'Снижение цены уменьшает оборот: если он упадёт ниже плана «Фиксированной ставки», комиссия вырастет на 5,5 %, и минимальная цена станет ' +
+            rub2((x.cost + fixed + x.target) / (1 - shareRate - 0.055)) + '. ' : '') +
+          'Скидка постоянного покупателя Wildberries уменьшает цену для покупателя, но не вашу цену продажи.</div>'
+        : '<div class="empty">Сумма процентных ставок не может быть 100 % и больше</div>');
+    }
+  }
+
+  /* ───── Запуск ───── */
+  var saved = store('session', 'hl_token');
+  if (saved) {
+    state.token = saved;
+    call('me').then(function (u) { state.user = u; start(); }).catch(function () { renderLogin(''); });
+  } else {
+    renderLogin('');
+  }
+})();
+</script>
