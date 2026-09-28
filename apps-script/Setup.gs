@@ -10,6 +10,7 @@ function onOpen() {
     .addItem('2. Выдать временный пароль сотруднику', 'issueTemporaryPassword')
     .addItem('Разблокировать вход сотрудника', 'unlockUser')
     .addSeparator()
+    .addItem('Настроить товары по таблице HOK\'S LOVE', 'applyHoksPreset')
     .addItem('Загрузить данные из источников сейчас', 'importNow')
     .addItem('Включить автозагрузку каждый час', 'importEnableSchedule')
     .addItem('Выключить автозагрузку', 'importDisableSchedule')

@@ -7,13 +7,14 @@
  *   Раздел | Поле | Таблица (ссылка) | Лист | Первая строка данных | Колонка в источнике | Пояснение
  * «Колонка в источнике» — буква (AV) или точный заголовок колонки (строка над первой строкой данных).
  * Таблицу и лист достаточно указать в строке ключевого поля раздела — остальные поля берут их оттуда.
+ * Несколько колонок через «+» складываются: «N+O+P».
  * Пустая колонка = поле не загружается, значение на листе сайта остаётся как есть (можно вести вручную).
  */
 
 // Функция, а не переменная: порядок загрузки файлов проекта не гарантирован
 function importGroups_() {
   return {
-    'Товары': { target: SHEETS.PRODUCTS, key: 'Артикул продавца', header: HEADERS.PRODUCTS },
+    'Товары': { target: SHEETS.PRODUCTS, key: 'Баркод', header: HEADERS.PRODUCTS },
     'Показатели Wildberries': { target: SHEETS.WB, key: 'Дата', header: HEADERS.METRICS },
     'Показатели Ozon': { target: SHEETS.OZON, key: 'Дата', header: HEADERS.METRICS }
   };
@@ -91,10 +92,16 @@ function readSource_(group, g) {
   var headerRow = g.firstRow > 1 ? sheet.getRange(g.firstRow - 1, 1, 1, lastCol).getValues()[0] : [];
   var data = sheet.getRange(g.firstRow, 1, lastRow - g.firstRow + 1, lastCol).getValues();
   var cols = {};
-  Object.keys(g.fields).forEach(function (f) { cols[f] = colIndex_(g.fields[f], headerRow, where); });
+  // «N+O+P» — сумма нескольких колонок (например, остатки на трёх складах Селсапа)
+  Object.keys(g.fields).forEach(function (f) {
+    cols[f] = g.fields[f].split('+').map(function (part) { return colIndex_(part.trim(), headerRow, where); });
+  });
   return data.map(function (row) {
     var o = {};
-    Object.keys(cols).forEach(function (f) { o[f] = row[cols[f]]; });
+    Object.keys(cols).forEach(function (f) {
+      o[f] = cols[f].length === 1 ? row[cols[f][0]]
+        : cols[f].reduce(function (sum, i) { return sum + num_(row[i]); }, 0);
+    });
     return o;
   });
 }
@@ -102,7 +109,7 @@ function readSource_(group, g) {
 /* ───────────── Товары ───────────── */
 
 function importProducts_(g) {
-  var def = importGroups_()['Товары'], key = def.key;
+  var def = importGroups_()['Товары'], key = def.key, keyIdx = def.header.indexOf(key);
   var merged = {}, order = [];
   readSource_('Товары', g).forEach(function (o) {
     var k = String(o[key] == null ? '' : o[key]).trim();
@@ -121,13 +128,13 @@ function importProducts_(g) {
   var width = def.header.length, existing = {};
   if (sheet.getLastRow() > 1) {
     sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues().forEach(function (r) {
-      if (r[0] !== '') existing[String(r[0])] = r;
+      if (r[keyIdx] !== '') existing[String(r[keyIdx])] = r;
     });
   }
   var rows = order.map(function (k) {
     var old = existing[k] || [];
     return def.header.map(function (f, i) {
-      if (i === 0) return k;
+      if (i === keyIdx) return k;
       return g.fields[f] ? (merged[k][f] === undefined ? '' : merged[k][f]) : (old[i] === undefined ? '' : old[i]);
     });
   });
@@ -178,7 +185,7 @@ function importAll() {
       if (!g || !g.sheet || !Object.keys(g.fields).length) { report.push(group + ': не настроено'); return; }
       try {
         var n = group === 'Товары' ? importProducts_(g) : importMetrics_(group, g);
-        report.push(group + ': ' + n + (group === 'Товары' ? ' артикулов' : ' дней'));
+        report.push(group + ': ' + n + (group === 'Товары' ? ' строк' : ' дней'));
       } catch (e) {
         report.push(group + ': ОШИБКА — ' + e.message);
       }
@@ -209,4 +216,46 @@ function importDisableSchedule_() {
 function importDisableSchedule() {
   importDisableSchedule_();
   SpreadsheetApp.getUi().alert('Автозагрузка выключена.');
+}
+
+/* ───────────── Готовая настройка под таблицу HOK'S LOVE, лист «WB Расчёт (тех)» ───────────── */
+
+var HOKS_PRESET = {
+  sheet: 'WB Расчёт (тех)', firstRow: 2,
+  fields: {
+    'Баркод': 'A',                                   // Баркод — ключ: одна строка на размер
+    'Артикул Wildberries': 'B',                      // Артикул WB
+    'Размер': 'C',                                   // Размер
+    'Артикул продавца': 'D',                         // Артикул поставщика
+    'Фото (ссылка)': 'E',                            // Фото (ссылка)
+    'Средние заказы в день, шт': 'K',                // Скорость всего, шт/день
+    'Остаток на складах Wildberries, шт': 'L',       // Остатки FBO WB
+    'Остаток на своём складе, шт': 'N+O+P',          // FBS + Склад + Упаковка (Селсап)
+    'Дозаказ, шт': 'T',                              // Дозаказ, шт
+    'Цена до скидки, ₽': 'X',                        // Цена до скидки, ₽
+    'Скидка продавца, %': 'Y',                       // Скидка продавца, %
+    'Статус запаса': 'AR',                           // Статус запаса
+    'Дней хватит': 'S',                              // Дней хватит (с учётом закупа в пути)
+    'Себестоимость, ₽': 'BE',                        // Фин: закупочная (Селсап) — колонка U «Себестоимость» пока пустая
+    'Остаток на складах Ozon, шт': 'BI'              // Ozon: остаток, шт
+  }
+};
+
+function applyHoksPreset() {
+  var ui = SpreadsheetApp.getUi();
+  var answer = ui.prompt('Настройка источника',
+    'Вставьте ссылку на таблицу HOK\'S LOVE, где есть лист «' + HOKS_PRESET.sheet + '».\n' +
+    'Если рабочая система установлена в этой же таблице — оставьте поле пустым.', ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  var table = answer.getResponseText().trim();
+  var sheet = SpreadsheetApp.getActive().getSheetByName(SHEETS.SOURCES);
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
+  rows.forEach(function (r) {
+    if (r[0] !== 'Товары') return;
+    var isKey = r[1] === 'Баркод';
+    r[2] = isKey ? table : ''; r[3] = isKey ? HOKS_PRESET.sheet : ''; r[4] = isKey ? HOKS_PRESET.firstRow : '';
+    r[5] = HOKS_PRESET.fields[r[1]] || '';
+  });
+  sheet.getRange(2, 1, rows.length, 6).setValues(rows);
+  ui.alert('Раздел «Товары» настроен на лист «' + HOKS_PRESET.sheet + '».\nТеперь: HOK\'S LOVE → «Загрузить данные из источников сейчас».');
 }

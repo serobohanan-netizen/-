@@ -61,27 +61,27 @@
   var users = [{ login: 'vladelec', name: 'Владелец' }, { login: 'menedzher', name: 'Анна' }, { login: 'sklad', name: 'Игорь' }, { login: 'sklad2', name: 'Дмитрий' }, { login: 'sklad3', name: 'Ольга' }];
 
   function products() {
-    var names = [
-      ['Пирсинг лабрет в ухо губу нос хеликс трагус гвоздик', 'Пирсинг', 'Сталь 316L', 985, 48, 18, 3200, 9800, 0, 120],
-      ['Пирсинг лабрет из титана серьга в ухо хрящ хеликс', 'Пирсинг', 'Титан ASTM F-136', 2001, 30, 64, 400, 1100, 0, 95],
-      ['Набор для пирсинга из 9 шт. циркуляры в ухо нос', 'Пирсинг', 'Сталь 316L', 2001, 70, 55, 5200, 21000, 300, 60],
-      ['Пирсинг кольцо кликер в нос септум и ухо', 'Пирсинг', 'Сталь 316L', 970, 45, 21, 0, 0, 0, 40],
-      ['Пирсинг циркуляр клыки вампира в смайл', 'Пирсинг', 'Сталь 316L', 985, 52, 17, 8000, 14000, 0, 25],
-      ['Моносерьга для пирсинга цветочек в хеликс хрящ в ухо', 'Серьги', 'Сталь 316L', 970, 40, 16, 900, 2400, 0, 0],
-      ['Пирсинг в пупок банан с фианитом сердце', 'Пирсинг', 'Сталь 316L', 985, 38, 24, 600, 3000, 150, 48],
-      ['Браслет со шармами', 'Браслеты', 'Сталь 316L', 970, 55, 30, 300, 700, 0, 2]
+    // [Артикул продавца, Артикул WB, Размер, Цена, Скидка, Себестоимость, Свой склад, WB, Ozon, В день, Дней хватит, Дозаказ, Статус]
+    var rows = [
+      ['wb-demo-01', '100000001', '1,2х6х2;3;4', 980, 35, 30, 2549, 1, 0, 32.03, 101, 274, 'Норма'],
+      ['wb-demo-01', '100000001', '1,2х8х2;3;4', 980, 35, 30, 2132, 3, 0, 13.74, 228, 0, 'Лишний запас'],
+      ['wb-demo-02', '100000002', '10 мм', 2001, 15, 294, 186, 1, 0, 8.81, 38, 633, 'Мало'],
+      ['wb-demo-03', '100000003', '6 мм', 1300, 0, 97, 29, 7, 0, 14.29, 38, 1036, 'Мало'],
+      ['wb-demo-03', '100000003', '8 мм', 1300, 0, 97, 123, 3, 0, 8.13, 22, 719, 'Дефицит'],
+      ['wb-demo-04', '100000004', '8 мм', 985, 65, 35, 9, 1, 0, 0.65, 15, 62, 'Дефицит'],
+      ['wb-demo-05', '100000005', '6х2 мм', 1018, 69, 13, 2932, 4, 0, 9.29, 316, 0, 'Лишний запас'],
+      ['wb-demo-06', '100000006', '1,2х6 мм', 985, 42, 97, 400, 0, 0, 0, 'нет продаж', 0, 'Нет продаж']
     ];
-    var items = names.map(function (n, i) {
-      var total = n[6] + n[7] + n[8], perDay = n[9], daysLeft = perDay ? total / perDay : null, status;
-      if (!total) status = 'Нет в наличии'; else if (!perDay) status = 'Нет продаж';
-      else if (daysLeft < 14) status = 'Дефицит'; else if (daysLeft > 90) status = 'Избыток'; else status = 'Норма';
-      var it = { sku: 'HL-' + (101 + i), wbSku: String(173726288 + i * 1117), ozonSku: i % 3 ? '' : String(1800000 + i), title: n[0], category: n[1], material: n[2],
-        own: n[6], wb: n[7], ozon: n[8], total: total, perDay: perDay, daysLeft: daysLeft, status: status };
+    var items = rows.map(function (n) {
+      var total = n[6] + n[7] + n[8];
+      var it = { sku: n[0], wbSku: n[1], ozonSku: '', title: '', category: '', material: '', size: n[2], barcode: '20400000000' + n[1].slice(-2),
+        photo: '', own: n[6], wb: n[7], ozon: n[8], total: total, perDay: n[9], daysLeft: typeof n[10] === 'number' ? n[10] : null,
+        reorder: n[11], status: n[12] };
       if (current.money) { it.price = n[3]; it.discount = n[4]; it.salePrice = n[3] * (1 - n[4] / 100); }
       if (current.cost) it.cost = n[5];
       return it;
     });
-    return { items: items, deficit: 14, surplus: 90, money: current.money, cost: current.cost };
+    return { items: items, deficit: 14, surplus: 90, money: current.money, cost: current.cost, statusFromSource: true };
   }
   var templates = [
     { id: '1', marketplace: 'Wildberries', type: 'Отзыв', rating: '5', situation: 'Благодарность за покупку', text: 'Здравствуйте! Благодарим Вас за выбор бренда HOK\'S LOVE и тёплый отзыв. Мы рады, что украшение подчеркнуло Вашу индивидуальность. Украшай себя с любовью!' },

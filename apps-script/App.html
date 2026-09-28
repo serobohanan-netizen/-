@@ -487,7 +487,9 @@
 
   /* ════════════════ ТОВАРЫ И СКЛАД ════════════════ */
   var prodState = { data: null, q: '', status: '', category: '' };
-  var STOCK_BADGE = { 'Дефицит': 'crit', 'Нет в наличии': 'crit', 'Избыток': 'warn', 'Нет продаж': 'warn', 'Норма': 'good' };
+  var STOCK_BADGE = { 'Дефицит': 'crit', 'Нет в наличии': 'crit', 'Мало': 'warn', 'Избыток': 'warn',
+                      'Лишний запас': 'warn', 'Нет продаж': 'warn', 'Норма': 'good' };
+  var STOCK_ORDER = ['Дефицит', 'Нет в наличии', 'Мало', 'Лишний запас', 'Избыток', 'Нет продаж', 'Норма'];
 
   VIEWS.products = {
     show: function () { call('products').then(function (d) { prodState.data = d; VIEWS.products.draw(); }).catch(fail); },
@@ -503,10 +505,13 @@
       var list = d.items.filter(function (i) {
         if (prodState.status && i.status !== prodState.status) return false;
         if (prodState.category && i.category !== prodState.category) return false;
-        if (q && (i.title + ' ' + i.sku + ' ' + i.wbSku + ' ' + i.ozonSku).toLowerCase().indexOf(q) < 0) return false;
+        if (q && (i.title + ' ' + i.sku + ' ' + i.wbSku + ' ' + i.ozonSku + ' ' + i.barcode + ' ' + i.size).toLowerCase().indexOf(q) < 0) return false;
         return true;
       });
-      var statuses = ['Дефицит', 'Нет в наличии', 'Избыток', 'Нет продаж', 'Норма'];
+      var statuses = Object.keys(counts).sort(function (a, b) {
+        var ia = STOCK_ORDER.indexOf(a), ib = STOCK_ORDER.indexOf(b);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
       var totalStock = d.items.reduce(function (s, i) { return s + i.total; }, 0);
       var totalPerDay = d.items.reduce(function (s, i) { return s + i.perDay; }, 0);
 
@@ -516,29 +521,48 @@
         '<div class="delta">запас ' + (totalPerDay ? n0(totalStock / totalPerDay) + ' дней' : '—') + '</div></div>' +
         statuses.map(function (s) {
           return '<button class="tile' + (prodState.status === s ? ' on' : '') + '" data-s="' + s + '"><div class="label">' + s + '</div>' +
-                 '<div class="value num">' + (counts[s] || 0) + '</div><div class="delta">' + badge(STOCK_BADGE[s], 'артикулов') + '</div></button>';
+                 '<div class="value num">' + (counts[s] || 0) + '</div><div class="delta">' + badge(STOCK_BADGE[s] || 'info', 'позиций') + '</div></button>';
         }).join('') + '</div>' +
-        '<div class="filters"><input class="input search" id="pq" placeholder="Поиск: название или артикул" value="' + esc(prodState.q) + '">' +
-        '<select class="input" id="pc" style="max-width:220px"><option value="">Все категории</option>' + options(cats, prodState.category) + '</select>' +
+        '<div class="filters"><input class="input search" id="pq" placeholder="Поиск: артикул, баркод, размер" value="' + esc(prodState.q) + '">' +
+        (cats.length ? '<select class="input" id="pc" style="max-width:220px"><option value="">Все категории</option>' + options(cats, prodState.category) + '</select>' : '') +
         (prodState.status ? '<button class="btn ghost small" id="pReset">Сбросить фильтр «' + esc(prodState.status) + '»</button>' : '') +
-        '<span class="grow"></span><span class="muted" style="font-size:12px">Дефицит — запаса меньше ' + n0(d.deficit) + ' дней, избыток — больше ' + n0(d.surplus) + ' дней</span></div>' +
-        '<div class="table-wrap"><table><thead><tr>' +
-        '<th>Артикул</th><th>Название</th>' +
+        '<span class="grow"></span><span class="muted" style="font-size:12px">' + (d.statusFromSource ? 'Состояние и дозаказ — из вашей таблицы' :
+          'Дефицит — запаса меньше ' + n0(d.deficit) + ' дней, избыток — больше ' + n0(d.surplus) + ' дней') + '</span></div>' +
+        // Телефон: карточки вместо таблицы
+        '<div class="stock-cards">' + (list.length ? list.map(function (i) {
+          var size = i.size && i.size !== '0' ? 'Размер ' + i.size : '';
+          return '<div class="card stock-card"><div class="prod">' +
+            (i.photo ? '<img src="' + esc(i.photo) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.visibility=\'hidden\'">' : '<span class="ph"></span>') +
+            '<div style="flex:1;min-width:0"><b>' + esc(i.sku) + '</b><div class="muted" style="font-size:12px">' + esc([size, i.wbSku ? 'Wildberries ' + i.wbSku : ''].filter(Boolean).join(' · ')) + '</div>' +
+            '<div style="margin-top:6px">' + badge(STOCK_BADGE[i.status] || 'info', i.status) + '</div></div>' +
+            '<div style="text-align:right"><div class="num" style="font-size:22px;font-weight:300">' + n0(i.total) + '</div><div class="muted" style="font-size:11px">штук всего</div></div></div>' +
+            '<div class="stock-meta"><span>Свой склад <b>' + n0(i.own) + '</b></span><span>Wildberries <b>' + n0(i.wb) + '</b></span><span>Ozon <b>' + n0(i.ozon) + '</b></span>' +
+            '<span>Запас <b>' + (i.daysLeft == null ? '—' : n0(i.daysLeft) + ' дней') + '</b></span>' + (i.reorder ? '<span>Дозаказ <b>' + n0(i.reorder) + '</b></span>' : '') + '</div></div>';
+        }).join('') : '<div class="card empty">Ничего не найдено</div>') + '</div>' +
+        '<div class="table-wrap stock-table"><table><thead><tr>' +
+        '<th>Товар</th><th>Артикул</th>' +
         (d.money ? '<th class="r">Цена со скидкой</th>' : '') + (d.cost ? '<th class="r">Себестоимость</th>' : '') +
         '<th class="r">Остаток, шт</th>' +
-        '<th class="r">В день</th><th class="r">Запас, дней</th><th>Состояние</th></tr></thead><tbody>' +
+        '<th class="r">В день</th><th class="r">Запас, дней</th><th class="r">Дозаказ</th><th>Состояние</th></tr></thead><tbody>' +
         (list.length ? list.map(function (i) {
-          return '<tr><td><b>' + esc(i.sku) + '</b><div class="muted" style="font-size:11px">' + (i.wbSku ? 'Wildberries ' + esc(i.wbSku) : '') + (i.ozonSku ? '<br>Ozon ' + esc(i.ozonSku) : '') + '</div></td>' +
-            '<td class="wrap">' + esc(i.title) + '<div class="muted" style="font-size:11px">' + esc([i.category, i.material].filter(Boolean).join(' · ')) + '</div></td>' +
+          var size = i.size && i.size !== '0' ? 'Размер ' + i.size : '';
+          return '<tr><td class="wrap"><div class="prod">' +
+            (i.photo ? '<img src="' + esc(i.photo) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.visibility=\'hidden\'">' : '<span class="ph"></span>') +
+            '<div>' + esc(i.title || size || 'Без названия') + '<div class="muted" style="font-size:11px">' +
+            esc([i.title ? size : '', i.category, i.material].filter(Boolean).join(' · ')) + '</div></div></div></td>' +
+            '<td><b>' + esc(i.sku) + '</b><div class="muted" style="font-size:11px">' + (i.wbSku ? 'Wildberries ' + esc(i.wbSku) : '') +
+            (i.ozonSku ? '<br>Ozon ' + esc(i.ozonSku) : '') + (i.barcode ? '<br>' + esc(i.barcode) : '') + '</div></td>' +
             (d.money ? '<td class="r num">' + rub(i.salePrice) + '<div class="muted" style="font-size:11px">' + rub(i.price) + ' − ' + n0(i.discount) + ' %</div></td>' : '') +
             (d.cost ? '<td class="r num">' + rub(i.cost) + '</td>' : '') +
             '<td class="r num"><b>' + n0(i.total) + '</b><div class="muted" style="font-size:11px">свой склад ' + n0(i.own) + '<br>Wildberries ' + n0(i.wb) + ' · Ozon ' + n0(i.ozon) + '</div></td><td class="r num">' + n1(i.perDay) + '</td>' +
-            '<td class="r num">' + (i.daysLeft == null ? '—' : n0(i.daysLeft)) + '</td><td>' + badge(STOCK_BADGE[i.status], i.status) + '</td></tr>';
-        }).join('') : '<tr><td colspan="8" class="empty">Ничего не найдено</td></tr>') +
+            '<td class="r num">' + (i.daysLeft == null ? '—' : n0(i.daysLeft)) + '</td>' +
+            '<td class="r num">' + (i.reorder ? '<b>' + n0(i.reorder) + '</b>' : '—') + '</td><td>' + badge(STOCK_BADGE[i.status] || 'info', i.status) + '</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="empty">Ничего не найдено</td></tr>') +
         '</tbody></table></div>' +
         '<details class="more"><summary>Как считается</summary><div class="formula" style="margin-top:10px">' +
         'Остаток всего = Свой склад + Склады Wildberries + Склады Ozon\n' +
-        'Запас, дней = Остаток всего ÷ Средние заказы в день\n' +
+        'Запас, дней = Остаток всего ÷ Средние заказы в день (если «Дней хватит» загружается из вашей таблицы — берётся оно)\n' +
+        'Состояние и дозаказ — из вашей таблицы, если загружаются; иначе состояние считается по порогам ниже.\n' +
         (d.money ? 'Цена со скидкой = Цена до скидки × (1 − Скидка продавца ÷ 100)\n' : '') +
         'Пороги дефицита и избытка меняются на листе «90_Параметры».</div></details>';
 
@@ -549,7 +573,7 @@
         prodState.q = e.target.value; var pos = e.target.selectionStart;
         VIEWS.products.draw(); var i = $('#pq'); i.focus(); i.setSelectionRange(pos, pos);
       };
-      $('#pc').onchange = function (e) { prodState.category = e.target.value; VIEWS.products.draw(); };
+      if ($('#pc')) $('#pc').onchange = function (e) { prodState.category = e.target.value; VIEWS.products.draw(); };
       if ($('#pReset')) $('#pReset').onclick = function () { prodState.status = ''; VIEWS.products.draw(); };
     }
   };

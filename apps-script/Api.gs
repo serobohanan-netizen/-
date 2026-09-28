@@ -49,7 +49,8 @@ function readRows_(sheetName, width) {
 
 function num_(v) {
   if (typeof v === 'number') return v;
-  var n = Number(String(v).replace(/\s/g, '').replace(',', '.'));
+  // «2 001 ₽», «38,9 %», «\-100%» → число; всё, кроме цифр, минуса, запятой и точки, отбрасывается
+  var n = Number(String(v).replace(/[^\d,.\-]/g, '').replace(',', '.'));
   return isFinite(n) ? n : 0;
 }
 
@@ -239,8 +240,12 @@ function getProducts_(user) {
     var own = num_(r[9]), wb = num_(r[10]), ozon = num_(r[11]), perDay = num_(r[12]);
     var total = own + wb + ozon;                        // Остаток всего = свой склад + Wildberries + Ozon
     var daysLeft = perDay > 0 ? total / perDay : null;  // Дней запаса = Остаток всего ÷ Средние заказы в день
-    var status;
-    if (total === 0) status = 'Нет в наличии';
+    if (r[18] !== '' && r[18] != null) {                 // «Дней хватит» из вашей таблицы (учитывает закуп в пути)
+      daysLeft = /\d/.test(String(r[18])) ? num_(r[18]) : null;
+    }
+    var status = String(r[16] || '').trim();   // статус из вашей таблицы, если он загружается
+    if (status) { /* берём как есть */ }
+    else if (total === 0) status = 'Нет в наличии';
     else if (perDay === 0) status = 'Нет продаж';
     else if (deficit && daysLeft < deficit) status = 'Дефицит';
     else if (surplus && daysLeft > surplus) status = 'Избыток';
@@ -249,7 +254,9 @@ function getProducts_(user) {
       sku: String(r[0]), wbSku: String(r[1]), ozonSku: String(r[2]), title: String(r[3]),
       category: String(r[4]), material: String(r[5]),
       own: own, wb: wb, ozon: ozon, total: total, perDay: perDay,
-      daysLeft: daysLeft, status: status
+      daysLeft: daysLeft, status: status,
+      size: String(r[13]), barcode: String(r[14]), photo: /^https:\/\//.test(String(r[15])) ? String(r[15]) : '',
+      reorder: r[17] === '' ? null : num_(r[17])
     };
     if (user.money) {
       item.price = num_(r[6]);
@@ -259,7 +266,8 @@ function getProducts_(user) {
     if (user.cost) item.cost = num_(r[8]);
     return item;
   });
-  return { items: items, deficit: deficit, surplus: surplus, money: user.money, cost: user.cost };
+  var statusFromSource = readRows_(SHEETS.PRODUCTS, HEADERS.PRODUCTS.length).some(function (r) { return String(r[16]).trim() !== ''; });
+  return { items: items, deficit: deficit, surplus: surplus, money: user.money, cost: user.cost, statusFromSource: statusFromSource };
 }
 
 /* ───────────── Шаблоны и параметры ───────────── */
